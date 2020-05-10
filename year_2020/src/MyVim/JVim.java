@@ -3,14 +3,15 @@ package MyVim;
 import javax.swing.*;
 import javax.swing.text.BadLocationException;
 import java.awt.*;
-import java.awt.event.FocusEvent;
-import java.awt.event.FocusListener;
-import java.awt.event.KeyEvent;
-import java.awt.event.KeyListener;
+import java.awt.event.*;
 import java.io.*;
+import java.lang.reflect.Array;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.InflaterInputStream;
 
 public class JVim extends JFrame {
@@ -19,6 +20,7 @@ public class JVim extends JFrame {
     ArrayList<String> mode=new ArrayList<>();
     Queue<Integer> queue=new LinkedList<Integer>();
     char mark[]=new char[2];
+    int i=-1;
     private File file;
 
     public static void main(String[] args) throws IOException {
@@ -45,6 +47,9 @@ public class JVim extends JFrame {
             //注意这里windows会出问题,因为分隔符和转义的原因
             File parentFile=new File(System.getProperty("user.dir"));
             file=new File(parentFile,"a.txt");
+            if(!file.exists()){
+                file.createNewFile();
+            }
         }else{
             //相对路径于绝对路径判断
             if(!args[1].startsWith("/")){
@@ -52,6 +57,9 @@ public class JVim extends JFrame {
                 file=new File(fileParent,args[0]);
             }else{
                 file=new File(args[0]);
+            }
+            if(!file.exists()){
+                file.createNewFile();
             }
 
             //填入text
@@ -126,6 +134,9 @@ public class JVim extends JFrame {
                     //进队
                     queue.offer((Integer)(e.getKeyCode()));
 
+                    if(i!=-1){
+                        jTextArea.setSelectionColor(Color.black);
+                    }
 
                     //有 i I a A o O六种方式进入编辑模式
 
@@ -154,7 +165,7 @@ public class JVim extends JFrame {
                         jLabel.setText(mode.get(1));
                         jTextArea.setCaretPosition(lineEndOffset);
                     }
-                    //这个要注意,window下为/r/n,Linux下为/n,mac下为/r
+                    //这个要注意,window下为\r\n,Linux下为\n,mac下为\r
                     //o为到下一行
                     if(e.getKeyCode()==KeyEvent.VK_O){
                         jLabel.setText(mode.get(1));
@@ -185,13 +196,25 @@ public class JVim extends JFrame {
                     }
 
                     //当键击为l键,并且插入符不在改行最后一个位置时
-                    if (e.getKeyCode()==KeyEvent.VK_L && (jTextArea.getCaretPosition()!=lineEndOffset)){
-                        jTextArea.setCaretPosition(jTextArea.getCaretPosition()+1);
+                    if (e.getKeyCode()==KeyEvent.VK_L){
+                        if(jTextArea.getText().endsWith("\n")){
+                            if(jTextArea.getCaretPosition()!=lineEndOffset-1){
+                                jTextArea.setCaretPosition(jTextArea.getCaretPosition()+1);
+                            }
+                        }else {
+                            if(jTextArea.getCaretPosition()!=lineEndOffset-1){
+                                jTextArea.setCaretPosition(jTextArea.getCaretPosition()+1);
+                            }else{
+                                if(jTextArea.getLineCount()==CaretPositionLine+1){
+                                    jTextArea.setCaretPosition(jTextArea.getCaretPosition()+1);
+                                }
+                            }
+                        }
                     }
 
 
                     //当键击为j键,并且下一行不为未编辑行时
-                    if (e.getKeyCode()==KeyEvent.VK_J && (jTextArea.getRows()!=CaretPositionLine+1)){
+                    if (e.getKeyCode()==KeyEvent.VK_J && (jTextArea.getLineCount()!=CaretPositionLine+1)){
                         //获取下一行的行号
                         int nextLine=CaretPositionLine+1;
 
@@ -212,16 +235,24 @@ public class JVim extends JFrame {
                         }
 
                         //获取下一行的长度
-                        int nextLineLength=nextLineEndOffset-nextLineEndOffset+1;
+                        int nextLineLength=nextLineEndOffset-nextLineStartOffset+1;
 
                         //获取光标处到其所在行行首的长度
                         int CaretLength=jTextArea.getCaretPosition()-lineStartOffset+1;
 
 
                         if(nextLineLength>=CaretLength){
-                            jTextArea.setCaretPosition(jTextArea.getCaretPosition()+lineLength);
+                            jTextArea.setCaretPosition(nextLineStartOffset+CaretLength-1);
                         }else{
-                            jTextArea.setCaretPosition(nextLineEndOffset);
+                            if(jTextArea.getText().endsWith("\n")){
+                                jTextArea.setCaretPosition(nextLineEndOffset-1);
+                            }else {
+                                if(CaretPositionLine!=jTextArea.getLineCount()-2){
+                                    jTextArea.setCaretPosition(nextLineEndOffset-1);
+                                }else {
+                                    jTextArea.setCaretPosition(nextLineEndOffset);
+                                }
+                            }
                         }
                     }
 
@@ -252,10 +283,10 @@ public class JVim extends JFrame {
                         //获取光标处到其所在行行首的长度
                         int CaretLength=jTextArea.getCaretPosition()-lineStartOffset+1;
 
-                        if(CaretLength>priorLineLength){
-                            jTextArea.setCaretPosition(priorLineEndOffset);
+                        if(CaretLength>=priorLineLength){
+                            jTextArea.setCaretPosition(priorLineEndOffset-1);
                         }else {
-                            jTextArea.setCaretPosition(priorLineStartOffset+CaretLength);
+                            jTextArea.setCaretPosition(priorLineStartOffset+CaretLength-1);
                         }
                     }
 
@@ -320,11 +351,35 @@ public class JVim extends JFrame {
 
             @Override
             public void keyPressed(KeyEvent e) {
+                String s=jLabel.getText();
+
                 if(e.getKeyCode()==KeyEvent.VK_ENTER){
                     jTextArea.grabFocus();
                     jLabel.setEditable(false);
-                    char arr[]=jLabel.getText().toCharArray();
-                    if(arr.length==2 && arr[1]=='w' && arr[0]==':'){
+
+                    //w
+                    if(s.equals(":w")){
+                        try {
+                            FileWriter fileWriter=new FileWriter(file);
+                            BufferedWriter bufferedWriter=new BufferedWriter(fileWriter);
+                            bufferedWriter.write(jTextArea.getText());
+                            bufferedWriter.close();
+                            jTextArea.grabFocus();
+                            jLabel.setEditable(false);
+                            jLabel.setText(mode.get(0));
+
+                        } catch (IOException ex) {
+                            ex.printStackTrace();
+                        }
+                    }
+
+                    //q
+                    else if(s.equals(":q")){
+                        jLabel.setText("已经修改但为保存,可用q!强制执行");
+                    }
+
+                    //wq
+                    else if (s.equals(":wq")){
                         try {
                             FileWriter fileWriter=new FileWriter(file);
                             BufferedWriter bufferedWriter=new BufferedWriter(fileWriter);
@@ -333,27 +388,50 @@ public class JVim extends JFrame {
                         } catch (IOException ex) {
                             ex.printStackTrace();
                         }
+                        System.exit(0);
                     }
-                    if(arr.length==3 && arr[0]==':'){
 
-                        if(arr[1]=='w' && arr[2]=='q'){
-                            try {
-                                FileWriter fileWriter=new FileWriter(file);
-                                BufferedWriter bufferedWriter=new BufferedWriter(fileWriter);
-                                bufferedWriter.write(jTextArea.getText());
-                                bufferedWriter.close();
-                                System.exit(0);
-                            } catch (IOException ex) {
-                                ex.printStackTrace();
+                    //q!
+                    else if (s.equals(":q!")){
+                        System.exit(0);
+                    }
+
+                    // /words and ?words
+                    else if (s.startsWith(":?") || s.startsWith(":/")){
+
+                        //匹配搜索内容
+                        char arr1[]=s.toCharArray();
+                        char arr2[]= Arrays.copyOfRange(arr1,2 ,arr1.length-1 );
+                        boolean flag=true;
+                        i=-1;
+                        String s2= Arrays.toString(arr2);
+                        Pattern pattern=Pattern.compile(s2);
+                        Matcher matcher=pattern.matcher(jTextArea.getText());
+
+                        while (matcher.find() && flag){
+                            i=matcher.start();
+                            if( s.startsWith(":?") && i<jTextArea.getCaretPosition()){
+                                jTextArea.select(i,(i+s2.length()-1));
+                                jTextArea.setSelectedTextColor(Color.red);
+                                flag=false;
+                            }
+                            if (s.startsWith(":/") && i>=jTextArea.getCaretPosition()){
+                                jTextArea.select(i,(i+s2.length()-1));
+                                jTextArea.setSelectedTextColor(Color.red);
+                                flag=false;
                             }
                         }
-
-                        if(arr[1]=='q' && arr[2]=='!'){
-                            System.exit(0);
-                        }
+                        jTextArea.grabFocus();
+                        jLabel.setEditable(false);
+                        jLabel.setText(mode.get(0));
                     }
-                    jLabel.setText(mode.get(0));
+                    else {
+                        jLabel.setText("命令错误,请重新输入命令");
+                    }
+                }
 
+                if ((s.equals("已经修改但为保存,可用q!强制执行")) ||(s.equals("命令错误,请重新输入命令"))){
+                    jLabel.setText(":");
                 }
 
                 if(e.getKeyCode()==KeyEvent.VK_ESCAPE){
@@ -361,6 +439,7 @@ public class JVim extends JFrame {
                     jLabel.setEditable(false);
                     jLabel.setText(mode.get(0));
                 }
+
             }
 
             @Override
@@ -375,4 +454,6 @@ public class JVim extends JFrame {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setVisible(true);
     }
+
 }
+
